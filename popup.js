@@ -169,9 +169,12 @@ function esc(s) {
 
 function addClaim() {
   const input = document.getElementById('claimInput');
-  const code  = input.value.trim().toUpperCase();
-  if (!code || claimedAirports.includes(code)) { input.value = ''; return; }
-  claimedAirports.push(code);
+  const codes  = input.value.trim().toUpperCase();
+  for (code of codes.split(/[\s,]+/)) {
+    if (code && !claimedAirports.includes(code)) {
+      claimedAirports.push(code);
+    }
+  }
   chrome.storage.sync.set({ claimedAirports });
   input.value = '';
   renderClaimed();
