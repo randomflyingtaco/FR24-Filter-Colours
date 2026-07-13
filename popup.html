@@ -30,7 +30,7 @@
   .swatch { width: 22px; height: 16px; border-radius: 3px; cursor: pointer; border: 2px solid transparent; padding: 0; }
   .swatch:hover { border-color: #333; }
 
-  #addGroup { width: 100%; padding: 5px 8px; margin-top: 6px; border: 1px dashed #ccc; background: none; cursor: pointer; border-radius: 4px; color: #666; font: inherit; }
+  #addGroup { padding: 5px 8px; border: 1px dashed #ccc; background: none; cursor: pointer; border-radius: 4px; color: #666; font: inherit; }
   #addGroup:hover { border-color: #999; color: #333; }
 
   /* Filter assignments */
@@ -43,6 +43,10 @@
   .airport-setting { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; }
   .airport-setting input[type=color] { width: 32px; height: 26px; border: 1px solid #ccc; border-radius: 4px; padding: 1px; cursor: pointer; flex-shrink: 0; }
   .airport-setting label { cursor: pointer; }
+
+  /* MapTrack-dependent sections */
+  .maptrack-disabled { opacity: 0.4; pointer-events: none; }
+  .maptrack-disabled h3::after { content: ' (requires MapTrack)'; font-size: 9px; letter-spacing: 0; text-transform: none; opacity: 0.8; }
 </style>
 </head>
 <body>
@@ -55,13 +59,17 @@
 <div class="tabs">
   <button class="tab active" data-tab="filters">Filters</button>
   <button class="tab" data-tab="airports">Airports</button>
+  <button class="tab" data-tab="settings">Settings</button>
 </div>
 
 <!-- Filters tab -->
 <div id="tab-filters">
   <h3>Colour Groups</h3>
   <div id="groups"></div>
-  <button id="addGroup">+ Add group</button>
+  <div style="display:flex;gap:6px;margin-top:6px;">
+    <button id="addGroup" style="flex:1;padding:5px 8px;border:1px dashed #ccc;background:none;cursor:pointer;border-radius:4px;color:#666;font:inherit;">+ Add group</button>
+    <button id="autoCreateGroups" style="flex:1;padding:5px 8px;border:1px dashed #6aa;background:none;cursor:pointer;border-radius:4px;color:#06b;font:inherit;" title="Create a colour group for each FR24 filter that doesn't already have one">↪ From filters</button>
+  </div>
 
   <h3>Filter Assignments</h3>
   <div id="filters"><p id="noFilters">Open flightradar24.com first to load filters.</p></div>
@@ -73,6 +81,10 @@
   <div class="airport-setting">
     <input type="checkbox" id="showAllAirports">
     <label for="showAllAirports">Show all airport dots</label>
+  </div>
+  <div id="hideEmptySection" class="airport-setting">
+    <input type="checkbox" id="hideEmptyAirportDots">
+    <label for="hideEmptyAirportDots">Hide dots with no aircraft in the air</label>
   </div>
   <div class="airport-setting">
     <input type="color" id="defaultAirportColor" value="#ff3b3b">
@@ -86,6 +98,18 @@
   </div>
   <div id="claimedList" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px;"></div>
   <button id="clearClaims" style="display:none;width:100%;padding:3px 8px;margin-bottom:4px;border:1px solid #fca5a5;border-radius:4px;background:none;cursor:pointer;font:inherit;color:#dc2626;font-size:12px;">Clear all claimed airports</button>
+</div>
+
+<!-- Settings tab -->
+<div id="tab-settings" style="display:none;">
+  <h3>MapTrack Server</h3>
+  <p style="font-size:11px;color:#888;margin:0 0 8px;">Optionally connect to a MapTrack server to enable additional features. Leave blank to use the extension standalone. MapTrack is currently in early alpha and not yet publicly available.</p>
+  <div style="display:flex;flex-direction:column;gap:6px;">
+    <input type="url"      id="maptrackUrl"  placeholder="https://maptrack.yoursite.com" style="padding:4px 7px;border:1px solid #ccc;border-radius:4px;font:inherit;font-size:12px;">
+    <input type="text"     id="maptrackUser" placeholder="Username" style="padding:4px 7px;border:1px solid #ccc;border-radius:4px;font:inherit;font-size:12px;">
+    <input type="password" id="maptrackPass" placeholder="Password" style="padding:4px 7px;border:1px solid #ccc;border-radius:4px;font:inherit;font-size:12px;">
+  </div>
+  <p id="maptrackStatus" style="margin:8px 0 0;font-size:11px;color:#888;"></p>
 </div>
 
 <p id="version" style="margin:12px 0 0;font-size:10px;color:#bbb;text-align:right;"></p>

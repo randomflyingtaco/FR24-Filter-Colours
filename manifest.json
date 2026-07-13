@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FR24 Filter Colours",
-  "version": "1.7",
+  "version": "2.0",
   "browser_specific_settings": {
     "gecko": {
       "id": "randomflyingtaco@gmail.com",
@@ -14,8 +14,9 @@
     }
   },
   "description": "Colour-code aircraft on Flightradar24 by filter group so you can instantly see which category each flight belongs to.",
-  "permissions": ["storage"],
-  "host_permissions": ["https://www.flightradar24.com/*"],
+  "background": { "service_worker": "background.js" },
+  "permissions": ["storage", "cookies"],
+  "host_permissions": ["https://www.flightradar24.com/*", "https://flightradar24.com/*"],
   "content_scripts": [{
     "matches": ["https://www.flightradar24.com/*"],
     "js": ["content.js"],
@@ -38,5 +39,11 @@
   "web_accessible_resources": [{
     "resources": ["injected.js"],
     "matches": ["https://www.flightradar24.com/*"]
-  }]
+  }],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "fr24-filter-colours@extension",
+      "strict_min_version": "121.0"
+    }
+  }
 }

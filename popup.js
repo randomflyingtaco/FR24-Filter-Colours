@@ -15,21 +15,74 @@ function setToggleUI(enabled) {
 
 async function load() {
   const [sync, local] = await Promise.all([
-    chrome.storage.sync.get(['groups', 'assignments', 'showAllAirports', 'defaultAirportColor', 'extensionEnabled', 'claimedAirports']),
+    chrome.storage.sync.get(['groups', 'assignments', 'showAllAirports', 'hideEmptyAirportDots', 'defaultAirportColor', 'extensionEnabled', 'claimedAirports', 'maptrackUrl', 'maptrackUser', 'maptrackPass']),
     chrome.storage.local.get(['fr24Filters']),
   ]);
   filters         = local.fr24Filters    || [];
   assignments     = sync.assignments     || {};
   groups          = sync.groups          || [];
   claimedAirports = sync.claimedAirports || [];
-  document.getElementById('showAllAirports').checked   = sync.showAllAirports    || false;
-  document.getElementById('defaultAirportColor').value = sync.defaultAirportColor || '#ff3b3b';
+  document.getElementById('showAllAirports').checked      = sync.showAllAirports      || false;
+  document.getElementById('hideEmptyAirportDots').checked = sync.hideEmptyAirportDots || false;
+  document.getElementById('defaultAirportColor').value    = sync.defaultAirportColor  || '#ff3b3b';
   setToggleUI(sync.extensionEnabled !== false);
+  document.getElementById('maptrackUrl').value  = sync.maptrackUrl  || '';
+  document.getElementById('maptrackUser').value = sync.maptrackUser || '';
+  document.getElementById('maptrackPass').value = sync.maptrackPass || '';
+  checkMapTrackConnection(sync.maptrackUrl || '', sync.maptrackUser || '', sync.maptrackPass || '');
   render();
 }
 
+function checkMapTrackConnection(url, user, pass) {
+  const el = document.getElementById('maptrackStatus');
+  if (!url) {
+    el.textContent = 'Not configured - MapTrack features disabled.';
+    el.style.color = '#888';
+    setMapTrackDependentUI(false);
+    return;
+  }
+  el.textContent = 'Checking…';
+  el.style.color = '#888';
+  // Visually disable while checking but don't clear storage — result not known yet
+  document.getElementById('hideEmptySection').classList.add('maptrack-disabled');
+  chrome.runtime.sendMessage({ type: 'pingMapTrack', url, user, pass }, resp => {
+    if (resp?.ok) {
+      el.textContent = `Connected to ${url}`;
+      el.style.color = '#16a34a';
+      setMapTrackDependentUI(true);
+    } else {
+      el.textContent = 'Connection failed - check URL and credentials.';
+      el.style.color = '#ef4444';
+      setMapTrackDependentUI(false);
+    }
+  });
+}
+
+function setMapTrackDependentUI(connected) {
+  document.getElementById('hideEmptySection').classList.toggle('maptrack-disabled', !connected);
+  if (!connected) {
+    document.getElementById('hideEmptyAirportDots').checked = false;
+    chrome.storage.sync.set({ hideEmptyAirportDots: false });
+  }
+}
+
+function saveMapTrack() {
+  const url  = document.getElementById('maptrackUrl').value.trim();
+  const user = document.getElementById('maptrackUser').value.trim();
+  const pass = document.getElementById('maptrackPass').value;
+  chrome.storage.sync.set({ maptrackUrl: url, maptrackUser: user, maptrackPass: pass });
+  checkMapTrackConnection(url, user, pass);
+}
+
+document.getElementById('maptrackUrl').addEventListener('change',  saveMapTrack);
+document.getElementById('maptrackUser').addEventListener('change', saveMapTrack);
+document.getElementById('maptrackPass').addEventListener('change', saveMapTrack);
+
 document.getElementById('showAllAirports').addEventListener('change', e => {
   chrome.storage.sync.set({ showAllAirports: e.target.checked });
+});
+document.getElementById('hideEmptyAirportDots').addEventListener('change', e => {
+  chrome.storage.sync.set({ hideEmptyAirportDots: e.target.checked });
 });
 document.getElementById('defaultAirportColor').addEventListener('input', e => {
   chrome.storage.sync.set({ defaultAirportColor: e.target.value });
@@ -159,6 +212,18 @@ document.getElementById('addGroup').addEventListener('click', () => {
   render();
 });
 
+document.getElementById('autoCreateGroups').addEventListener('click', () => {
+  const existingNames = new Set(groups.map(g => g.name));
+  const toAdd = filters.filter(f => !existingNames.has(f.name));
+  if (!toAdd.length) return;
+  const palette = PRESETS;
+  toAdd.forEach((f, i) => {
+    groups.push({ id: uid(), name: f.name, color: palette[i % palette.length] });
+  });
+  save();
+  render();
+});
+
 function uid() {
   return crypto.randomUUID();
 }
@@ -200,6 +265,13 @@ document.getElementById('refreshFilters').addEventListener('click', () => {
   chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
     chrome.tabs.sendMessage(tabs[0].id, { type: 'refreshFilters' });
   });
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.fr24Filters) {
+    filters = changes.fr24Filters.newValue || [];
+    renderFilters();
+  }
 });
 
 document.getElementById('version').textContent = 'v' + chrome.runtime.getManifest().version;

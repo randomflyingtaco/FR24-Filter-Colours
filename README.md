@@ -1,6 +1,6 @@
 # FR24 Filter Colours
 
-A Chrome extension that overlays coloured dots on [Flightradar24](https://www.flightradar24.com) so you can instantly see which of your filters an aircraft belongs to, without having to enable filters one at a time.
+A browser extension (Chrome and Firefox) that colour-codes aircraft on [Flightradar24](https://www.flightradar24.com) by filter group, so you can instantly see which of your filters an aircraft belongs to without having to enable filters one at a time.
 
 It also marks airports from your filters directly on the map, colour-coded by country.
 
@@ -14,38 +14,54 @@ It also marks airports from your filters directly on the map, colour-coded by co
 
 ## What it does
 
-- Draws a **coloured dot** on each aircraft that matches one of your FR24 filters
-- Shows a **label to the left** of the dot with the aircraft's altitude and which colour group it belongs to
-- Draws a **small coloured dot** on airport locations pulled from your FR24 filters, colour-coded by country
-- Colour groups and filter assignments **sync across devices** via your Google account
+- Draws a **coloured ring** around each aircraft that matches one of your FR24 filters
+- Shows a **label** to the left of the ring with the aircraft's altitude and colour group name
+- Draws a **coloured dot** on airport locations from your FR24 Airport filter conditions, colour-coded by country
+- Marks **claimed airports** with a gold ring overlay (airports you've unlocked in Skycards)
+- Colour groups and filter assignments **sync across devices** via your browser account
+
+The extension is **display-only**: it reads your existing FR24 filters and aircraft positions, but never creates, modifies, or deletes anything on FR24.
 
 ---
 
 ## Installation
 
-This is an unpacked extension, it isn't on the Chrome Web Store.
+This is an unpacked extension; it isn't on the Chrome Web Store or Firefox Add-ons.
+
+### Chrome
 
 1. Download or clone this repository
-2. Open Chrome and go to `chrome://extensions`
-3. Enable **Developer mode** (top right toggle)
+2. Go to `chrome://extensions`
+3. Enable **Developer mode** (top-right toggle)
 4. Click **Load unpacked** and select the folder containing this extension
-5. Navigate to [flightradar24.com](https://www.flightradar24.com) and the extension activates automatically
+5. Navigate to [flightradar24.com](https://www.flightradar24.com). The extension activates automatically
 
-> **Syncing across devices:** because this is an unpacked extension, both installs must use the same copy of the folder (e.g. via Google Drive). The `"key"` field in `manifest.json` ensures both devices share the same extension ID so `chrome.storage.sync` works correctly.
+> **Syncing across devices:** because this is an unpacked extension, both installs must use the same copy of the folder (e.g. via Google Drive). The `"key"` field in `manifest.json` ensures both Chrome installs share the same extension ID so `chrome.storage.sync` works correctly across them. This field is Chrome-specific and is ignored by Firefox.
+
+### Firefox
+
+Firefox requires version 121 or later (released January 2024).
+
+1. Download or clone this repository
+2. Go to `about:debugging#/runtime/this-firefox`
+3. Click **Load Temporary Add-on…** and select `manifest.json` inside the extension folder
+4. Navigate to [flightradar24.com](https://www.flightradar24.com)
+
+> **Note:** Firefox temporary add-ons are removed when the browser is closed. For a persistent install you would need to sign the extension via [Mozilla's self-distribution process](https://extensionworkshop.com/documentation/publish/self-distribution/). Sync via `browser.storage.sync` works if you are signed into Firefox Sync.
 
 ### About the `"key"` field in manifest.json
 
-Unpacked extensions normally get a random ID each time they are loaded, which would break sync because Chrome namespaces storage by extension ID. The `"key"` field is an RSA public key that Chrome uses to derive a stable, consistent ID instead.
+Unpacked extensions in Chrome normally get a random ID each time they are loaded, which would break sync because Chrome namespaces storage by extension ID. The `"key"` field is an RSA public key that Chrome uses to derive a stable, consistent ID instead.
 
-It is safe to share publicly. It is the public half of a key pair and reveals nothing sensitive. Anyone can verify this is standard practice in the [Chrome extension documentation](https://developer.chrome.com/docs/extensions/reference/manifest/key).
+It is safe to share publicly; it is the public half of a key pair and reveals nothing sensitive. See the [Chrome extension documentation](https://developer.chrome.com/docs/extensions/reference/manifest/key).
 
-If you want your own stable ID rather than using the one in this repo, you can generate a new key pair and replace the value:
+To generate your own stable ID:
 
 ```bash
 openssl genrsa 2048 | openssl rsa -pubout -outform DER | openssl base64 -A
 ```
 
-Paste the output as the `"key"` value in `manifest.json`. Your extension will get a different ID from this repo's, but sync will still work across your own devices.
+Paste the output as the `"key"` value in `manifest.json`.
 
 ---
 
@@ -53,52 +69,64 @@ Paste the output as the `"key"` value in `manifest.json`. Your extension will ge
 
 ### 1. Create colour groups
 
-Click the extension icon in your toolbar to open the popup.
-
-Under **Colour Groups**, click **+ Add group**. Give it a name (e.g. `Austria`) and pick a colour using the colour picker or one of the quick-select swatches.
-
-You can create as many groups as you need.
+Click the extension icon to open the popup. Under **Colour Groups**, click **+ Add group**, give it a name (e.g. `Austria`), and pick a colour. You can also click **From filters** to generate one group per filter automatically.
 
 ### 2. Assign filters to groups
 
-The **Filter Assignments** section lists all your FR24 filters. Use the dropdown next to each filter to assign it to a colour group.
+The **Filters** tab lists all your FR24 filters. Use the dropdown next to each filter to assign it to a colour group. Filter changes are picked up automatically; click **↺ Refresh** to force a re-read.
 
-Filter changes (adding, removing, or editing registrations and airport codes) are picked up automatically without reloading the page. If something looks out of sync, click **↺ Refresh Filters** at the top of the popup to force a re-read.
+> **Filters not showing?** Open [flightradar24.com](https://www.flightradar24.com) first; the extension reads the filter list from the FR24 page. The popup will show "Open flightradar24.com first to load filters" until then.
 
-Aircraft matching that filter will appear on the map with a dot in the assigned colour.
-
-> Filters must be set up in FR24 first. The extension reads them directly from the page, no manual entry needed.
+> **Renamed or deleted a filter?** If you delete and recreate a filter in FR24, it gets a new ID; reassign it to a colour group in the popup. Renaming a filter is fine and picks up automatically.
 
 ### 3. Airport dots
 
-Any FR24 filter that uses **Airport** conditions (destination or origin) will automatically have those airports marked on the map with a dot.
+FR24 filters that use **Airport** conditions automatically have those airports marked on the map. The dot colour comes from a **colour group whose name matches the airport's country**, not which filter the airport is in.
 
-The dot colour is determined by finding a **colour group whose name matches the airport's country** (as FR24 reports it). The airport codes themselves can live in any filter, it's purely the colour group name that controls the colour.
+So if you have a group named `Austria` with a red colour, all airports in Austria that appear in your filters will show as red dots.
 
-For example: a colour group named `Austria` (set to pink) will cause all Austrian airports from any of your filters to appear as pink dots.
+- **Show all airport dots:** also shows airports with no matching colour group, using the default colour
+- **Default colour:** colour used for unmatched airports when "show all" is on (defaults to red)
 
-By default only airports with a matching colour group are shown. The **Airport Dots** section in the popup has two settings:
+### 4. Claimed airports
 
-- **Show all airport dots**: when ticked, airports with no matching colour group are also shown using the default colour
-- **Default colour**: the colour used for unmatched airports when the above option is enabled (defaults to red)
+The **Airports** tab has a **Claimed Airports** section. Add IATA codes for airports you've unlocked in Skycards; they appear on the map as a gold ring overlay. These sync across devices via your browser account.
+
+---
+
+## Settings tab
+
+The Settings tab contains an optional integration with MapTrack, a private companion service currently in early alpha and not yet publicly available. If you haven't been given access, all fields on this tab can be left blank and the extension works fully without it.
+
+---
+
+## File reference
+
+| File | Purpose |
+|---|---|
+| `manifest.json` | Extension manifest (MV3, Chrome and Firefox 121+) |
+| `background.js` | Service worker; handles optional server communication and message routing |
+| `content.js` | Bridge between the FR24 page and the service worker |
+| `injected.js` | Runs in the FR24 window context; hooks the aircraft store, runs filter matching, draws the map overlay |
+| `popup.html` / `popup.js` | Three-tab popup: Filters, Airports, Settings |
 
 ---
 
 ## Notes
 
-- The extension only **reads** data from FR24, it makes no requests to FR24's servers and has no effect on your account
-- Disabling a filter in FR24 will hide its aircraft dots and airport dots automatically
-- Deleting and recreating a filter in FR24 will assign it a new ID, you'll need to reassign it to a colour group in the popup. Renaming a filter is fine
-- If dots aren't showing after installing on a new device, try fully quitting and restarting Chrome
-- The **On/Off** button at the top of the popup lets you pause the extension without uninstalling it. See the performance note below
+- The extension never creates, modifies, or deletes anything on FR24. It reads filter and aircraft data from the page, and may make read-only requests to the FR24 filter API to keep its local state in sync when you make changes in the FR24 UI.
+- Disabling a filter in the FR24 UI hides its aircraft and airport dots in the extension automatically.
+- The **On/Off** button pauses the extension (hides all dots) without uninstalling it.
+- If dots aren't showing after installing on a new device, fully quit and restart the browser.
+- The filter list is populated from the FR24 page; you must have [flightradar24.com](https://www.flightradar24.com) open before the popup can show filter assignments.
 
 ---
 
 ## Performance
 
-The extension processes every aircraft position update from FR24. Under normal use this is fine, but FR24's **show all aircraft** mode (the funnel icon button) can put thousands of aircraft on screen at once and cause the page to lag or freeze while the extension works through them.
+The extension processes every aircraft position update from FR24 and redraws its overlay on every map pan or zoom. Airport dots are viewport-culled: only dots inside the current map view are positioned, and off-screen dots are hidden rather than destroyed, so panning remains smooth even with **Show all airport dots** enabled.
 
-> **Warning:** turn the extension **Off** using the button in the popup before enabling FR24's show-all mode. FR24 does not expose this state in a way the extension can detect, so it cannot pause itself automatically. Turn it back **On** once you are done.
+Under normal use the overhead is negligible. FR24's **show all aircraft** mode can still put thousands of aircraft on screen and cause FR24 itself to lag, but that is a FR24 limitation rather than an extension one.
 
 ---
 
@@ -106,7 +134,7 @@ The extension processes every aircraft position update from FR24. Under normal u
 
 This extension was built with the [FR24 Skycards](https://www.flightradar24.com/skycards) game in mind. A typical setup:
 
-- One colour group per country still needed
-- Country filters contain the aircraft registrations known to serve airports you need
-- Continent-wide filters (e.g. `Europe - A:G`) contain the airport codes for airports still to unlock
-- The map then shows both which aircraft are relevant **and** which airports to watch for
+- One colour group per country you're working on
+- Airport filters for each country (e.g. `Europe - A:G`) containing the airport codes for airports you still need to unlock; these appear as coloured dots on the map so you can see at a glance which airports to watch
+- Registration or airline filters to highlight aircraft known to serve those airports
+- Airports you've already unlocked go in **Claimed airports** so their locations are still visible on the map with a gold ring
