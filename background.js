@@ -18,6 +18,11 @@ function loadConfig() {
 loadConfig();
 chrome.storage.onChanged.addListener(loadConfig);
 
+// Closed designated tab must not block command draining for the remaining tabs
+chrome.tabs.onRemoved.addListener(tabId => {
+  if (tabId === designatedTabId) designatedTabId = null;
+});
+
 function mtFetch(path, opts = {}) {
   return _configLoaded.then(() => {
     if (!_url) return null; // no server configured — callers check for null
@@ -85,6 +90,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(msg.data),
+    }).catch(() => {});
+    return false;
+  }
+
+  if (msg.type === 'postLogEvent') {
+    mtFetch('/scraper/log-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(msg.entry),
     }).catch(() => {});
     return false;
   }

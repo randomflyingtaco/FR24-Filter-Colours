@@ -119,6 +119,7 @@ The Settings tab contains an optional integration with MapTrack, a private compa
 - The **On/Off** button pauses the extension (hides all dots) without uninstalling it.
 - If dots aren't showing after installing on a new device, fully quit and restart the browser.
 - The filter list is populated from the FR24 page; you must have [flightradar24.com](https://www.flightradar24.com) open before the popup can show filter assignments.
+- **Airline filters:** "painted as" filters match the aircraft's actual livery when FR24 provides it — enable **airline logos** (or logo-on-hover) in FR24's own map settings for this to work. Without logos enabled, "painted as" falls back to callsign matching, which reflects who is *operating* the flight and can mismatch when an aircraft flies for an airline other than its livery. "Operating as" filters always match by callsign; the rare flight using a non-standard callsign (some charters/ferry flights) may be missed.
 
 ---
 

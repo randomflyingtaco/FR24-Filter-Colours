@@ -79,7 +79,10 @@ function fetchFilterCommands() {
   if (!alive()) return;
   chrome.runtime.sendMessage({ type: 'getFilterCommands' }, resp => {
     if (chrome.runtime.lastError) return;
-    if (resp?.cmds?.length) document.documentElement.dataset.fr24filtercommands = JSON.stringify(resp.cmds);
+    if (resp?.cmds?.length) {
+      console.log('[FR24FC] draining', resp.cmds.length, 'command(s) in this tab');
+      document.documentElement.dataset.fr24filtercommands = JSON.stringify(resp.cmds);
+    }
   });
 }
 
@@ -117,7 +120,19 @@ new MutationObserver(() => {
 { const token = document.documentElement.dataset.fr24accesstoken;
   if (token && alive()) chrome.runtime.sendMessage({ type: 'pushFR24Credentials', token }).catch(() => {}); }
 
+// Relay activity-log entries from injected.js (page context) to MapTrack
+window.addEventListener('message', e => {
+  if (e.source !== window || e.data?.fr24fc !== 'log-event') return;
+  if (alive()) chrome.runtime.sendMessage({ type: 'postLogEvent', entry: e.data.entry }).catch(() => {});
+});
+
 fetchRegMap();
 fetchFilterCommands();
-setInterval(fetchFilterCommands, 10000); // pick up refresh signals without needing a tab switch
+setInterval(fetchFilterCommands, 10000);   // pick up refresh signals without needing a tab switch
+setInterval(fetchMapTrackClaimed, 30000);  // keep claimed airport rings in sync
 document.addEventListener('visibilitychange', onVisible);
+// visibilitychange never fires between two VISIBLE windows; without this, a
+// second FR24 window can hold command designation while the user watches the first
+window.addEventListener('focus', () => {
+  if (alive()) chrome.runtime.sendMessage({ type: 'becomeDesignated' }).catch(() => {});
+});

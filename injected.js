@@ -3,6 +3,9 @@
 
   console.log('[FR24FC] injected.js loaded');
 
+  // Save the native fetch before any patch so the refresh handler can always reach the real API.
+  const _nativeFetch = window.fetch;
+
   // --- Config (written by content.js via dataset) ---
   // Returns filterId → hex colour map for all currently assigned filters
 
@@ -63,6 +66,35 @@
     }
   }
 
+  // --- Airline DB (numeric id → ICAO) for exact 'painted as' matching (E3) ---
+  // FR24's feed attaches the livery airline as a numeric id (aircraft.logoId), but
+  // only when the user's FR24 map settings have airline logos or logo-on-hover
+  // enabled. The public airline list maps that id to the ICAO code filter
+  // conditions use. Lazy: fetched once per session, only when an assigned filter
+  // actually has a painted condition. Fail-soft: while null, matchesCond falls
+  // back to the callsign heuristic.
+
+  let _airlineIcaoById = null;
+  let _airlineDbLoading = false;
+
+  function ensureAirlineDb() {
+    if (_airlineIcaoById || _airlineDbLoading) return;
+    _airlineDbLoading = true;
+    _nativeFetch('https://www.flightradar24.com/mobile/airlines?format=2&version=0')
+      .then(r => r.json())
+      .then(d => {
+        if (!Array.isArray(d?.rows)) throw new Error('unexpected shape');
+        _airlineIcaoById = new Map(d.rows.filter(a => a.icao).map(a => [a.id, a.icao]));
+        console.log('[FR24FC] airline db loaded:', _airlineIcaoById.size);
+        // Re-match so already-coloured aircraft correct themselves with exact livery data
+        if (aircraftStore) processAircraftMap(aircraftStore.$state.aircraftMap);
+      })
+      .catch(e => {
+        console.warn('[FR24FC] airline db load failed (painted filters fall back to callsign):', e);
+        setTimeout(() => { _airlineDbLoading = false; }, 60000); // allow a retry, rate-limited
+      });
+  }
+
   // --- Filter matching ---
 
   function matchesCond(ac, c) {
@@ -72,8 +104,19 @@
       case 'Altitude':     return ac.alt  >= c.value[0] && ac.alt <= c.value[1];
       case 'Airport':      return (c.direction === 'in' ? ac.dest : ac.origin) === c.value;
       case 'Airline':
-        // matched by callsign prefix — misses codeshares with non-standard callsigns
-        return !!(ac.callsign?.startsWith(c.value));
+        // 'painted' matches exactly via the livery id when FR24 supplies one (needs
+        // airline logos or logo-on-hover enabled in FR24's map settings) and the
+        // airline db has loaded. Otherwise BOTH operators fall back to callsign
+        // prefix — the callsign reflects the OPERATOR, so the fallback can
+        // false-positive when a plane flies for an airline other than its livery
+        // (reporter-approved 2026-07-16). 'operating' stays callsign-based: FR24
+        // decodes the operator id from its feed but drops it before the aircraft
+        // store, so exact operator matching has no data source (rare non-standard
+        // callsigns are missed).
+        if (c.operator === 'painted' && ac.logoId != null && _airlineIcaoById) {
+          return _airlineIcaoById.get(ac.logoId) === c.value;
+        }
+        return !!(c.value && ac.callsign?.startsWith(c.value));
       default: return false;
     }
   }
@@ -115,14 +158,20 @@
     const assignedFilters  = allFilters
       .filter(f => f.enabled && filterColorMap[f.id])
       .sort((a, b) => {
-        // destination (Airport direction:in) last = highest priority; reg next; everything else first
+        // First match wins in the loop below, so highest priority sorts FIRST:
+        // destination (Airport direction:in), then reg, then everything else.
+        // (Was ascending, which inverted the documented priority: a reg filter
+        // stole the match from a destination filter. Fixed 2026-07-16.)
         function prio(f) {
           if (f.conditions.some(c => c.type === 'Airport' && c.direction === 'in')) return 2;
           if (f.conditions.some(c => c.type === 'Registration')) return 1;
           return 0;
         }
-        return prio(a) - prio(b);
+        return prio(b) - prio(a);
       });
+
+    if (!_airlineIcaoById && assignedFilters.some(f =>
+      f.conditions.some(c => c.type === 'Airline' && c.operator === 'painted'))) ensureAirlineDb();
 
     acData.clear();
     for (const [id, a] of Object.entries(aircraftMap)) {
@@ -135,6 +184,7 @@
         origin:   a.from,
         dest:     a.to,
         callsign: a.callsign,
+        logoId:   a.logoId,
       };
       for (const f of assignedFilters) {
         if (matchesFilter(ac, f.conditions)) {
@@ -175,6 +225,155 @@
     syncFilterListToDataset();
   }
 
+  // The filter button is conditionally rendered by FR24's Vue (absent while
+  // logged out and during app mount), so a one-shot querySelector can miss a
+  // button that appears moments later. Poll until it exists, re-querying every
+  // attempt because Vue can also REPLACE the node at any time.
+  function waitForFilterButton(timeoutMs) {
+    return new Promise(resolve => {
+      const t0 = Date.now();
+      (function poll() {
+        const btn = document.querySelector('#bottom-panel__filters-button');
+        if (btn && btn.isConnected) return resolve(btn);
+        if (Date.now() - t0 >= timeoutMs) return resolve(null);
+        setTimeout(poll, 150);
+      })();
+    });
+  }
+
+  // FR24's Vue does not process the re-read while the tab is hidden (owner
+  // confirmed 2026-07-16: clicks land but nothing updates until tabbed in), so
+  // clicking a hidden tab wastes the toggle. Defer until visible; the runner's
+  // _cmdRunning guard holds later batches in order while we wait.
+  function waitForVisible() {
+    if (document.visibilityState === 'visible') return Promise.resolve();
+    console.log('[FR24FC] refresh click deferred until tab is visible');
+    return new Promise(r => document.addEventListener('visibilitychange', function h() {
+      if (document.visibilityState !== 'visible') return;
+      document.removeEventListener('visibilitychange', h);
+      r();
+    }));
+  }
+
+  // Double-toggle: FR24 re-reads its filters only on the sidebar's closed→open
+  // transition, and one click just toggles. If the sidebar was already open, a
+  // single click would close it (no re-read) and leave icons stale. Two clicks
+  // always pass through exactly one open AND return the sidebar to its starting
+  // state. The gap between them matters: a synchronous open→close can coalesce
+  // in FR24's Vue reactivity to a no-op and skip the re-read entirely.
+  // Each click waits for tab visibility and a LIVE re-queried button: the old
+  // single-capture version silently lost clicks when the button was missing at
+  // drain time or was replaced by Vue between the two clicks (a detached-node
+  // click is a no-op). Every failure now warns, so a D3 contract violation is
+  // visible. Async, so callers can await the full double-click (.finally waits
+  // on a returned thenable), keeping stacked batches from interleaving clicks.
+  // 750ms is the tuning knob - raise if the re-read doesn't stick.
+  async function clickFilterButton() {
+    await waitForVisible();
+    const first = await waitForFilterButton(10000);
+    if (!first) { console.warn('[FR24FC] refresh click FAILED: filter button not found within 10s'); return; }
+    first.click();
+    console.log('[FR24FC] refresh click 1/2');
+    await new Promise(r => setTimeout(r, 750));
+    await waitForVisible(); // user may have tabbed away mid-gap
+    const second = await waitForFilterButton(5000);
+    if (!second) { console.warn('[FR24FC] refresh click 2/2 FAILED: filter button gone; sidebar left toggled'); return; }
+    second.click();
+    console.log('[FR24FC] refresh click 2/2');
+  }
+
+  // B13: the refresh contract is "re-click FR24's filter button". Sync internal state
+  // first (so the click re-applies the POST-mutation filter list), but the click itself
+  // must happen exactly once per drained batch containing a refresh — even if the
+  // webAPI fetch fails or returns no list. Zero clicks is the bug.
+  function refreshFilters(token) {
+    return _nativeFetch('https://www.flightradar24.com/webapi/v1/filters?only=filters', {
+      headers: { accesstoken: token },
+    }).then(r => r.json()).then(({ data: d }) => {
+      const list = d?.filters;
+      if (!list) return;
+      allFilters = list.map(f => ({ id: String(f.id), name: f.name, enabled: f.enabled, conditions: f.conditions }));
+      updateAirportCodesFromAllFilters();
+      if (aircraftStore) processAircraftMap(aircraftStore.$state.aircraftMap);
+      syncFilterListToDataset();
+      // Patch the Pinia dispatcher store so the click re-applies the fresh list,
+      // not the page's stale one (the mutation happened server-side via webAPI).
+      if (dispatcherStore) {
+        try {
+          dispatcherStore.$patch(state => {
+            const f = state?.dispatcher?.filters;
+            if (f && Array.isArray(f.filters)) f.filters = list;
+          });
+        } catch (_) {}
+      }
+      console.log('[FR24FC] filters refreshed:', allFilters.length);
+    }).catch(() => {}).finally(clickFilterButton);
+  }
+
+  // No-creds path: replay a server-composed FR24 request spec
+  // ({type:'fr24', method, path, body, log}) with the page's access token.
+  // The server owns command semantics and log formatting; the extension only
+  // executes and reports. Path is pinned to the filters API as a trust boundary.
+  async function executeCommand(cmd, token) {
+    if (!/^\/webapi\/v1\/filters(\/|\?|$)/.test(cmd.path || '')) {
+      console.warn('[FR24FC] rejected command path:', cmd.path);
+      return;
+    }
+    let ok = false;
+    try {
+      const r = await _nativeFetch('https://www.flightradar24.com' + cmd.path, {
+        method: cmd.method,
+        headers: { accesstoken: token, ...(cmd.body != null && { 'Content-Type': 'application/json' }) },
+        body: cmd.body != null ? JSON.stringify(cmd.body) : undefined,
+      });
+      ok = r.ok;
+    } catch (_) {}
+    console.log(`[FR24FC] cmd ${cmd.method} ${cmd.path} -> ${ok ? 'ok' : 'FAILED'}`);
+    if (cmd.log) {
+      window.postMessage({ fr24fc: 'log-event', entry: { ...cmd.log, ok, source: 'extension' } }, '*');
+    }
+  }
+
+  // Backlog decouples draining (attribute writes) from execution: batches drained
+  // before the token exists wait, and overlapping batches run strictly in order.
+  let _cmdBacklog = [];
+  let _cmdRunning = false;
+
+  function processFilterCommands() {
+    const raw = document.documentElement.dataset.fr24filtercommands;
+    if (raw) {
+      document.documentElement.removeAttribute('data-fr24filtercommands');
+      try { _cmdBacklog.push(...JSON.parse(raw)); } catch (_) {}
+    }
+    if (_cmdRunning || !_cmdBacklog.length) return;
+    const token = getAccessToken();
+    if (!token) {
+      // Mutations need the token - hold them (retried when the dispatcher store lands).
+      // A refresh-only backlog can still honour the contract with a bare click,
+      // serialized through _cmdRunning so it can't interleave with a later batch.
+      if (_cmdBacklog.every(c => c.type === 'refresh')) {
+        _cmdBacklog = [];
+        _cmdRunning = true;
+        clickFilterButton().finally(() => { _cmdRunning = false; });
+      }
+      return;
+    }
+    _cmdRunning = true;
+    (async () => {
+      while (_cmdBacklog.length) {
+        const cmds = _cmdBacklog; _cmdBacklog = [];
+        let needRefresh = false;
+        for (const cmd of cmds) {
+          if (cmd.type === 'refresh') { needRefresh = true; continue; }
+          if (cmd.type === 'fr24')    { await executeCommand(cmd, token); continue; }
+          console.warn('[FR24FC] unknown command type:', cmd.type);
+        }
+        // One effective re-click per batch, strictly after its mutations (duplicates coalesced)
+        if (needRefresh) await refreshFilters(token);
+      }
+    })().finally(() => { _cmdRunning = false; });
+  }
+
   const dispatcherTimer = setInterval(() => {
     const app   = document.querySelector('#app')?.__vue_app__;
     const pinia = app?.config?.globalProperties?.$pinia;
@@ -187,6 +386,9 @@
     if (_token) document.documentElement.dataset.fr24accesstoken = _token;
     updateFiltersFromStore(dispatcher.$state.dispatcher);
     dispatcher.$subscribe((_, state) => updateFiltersFromStore(state.dispatcher));
+    // Commands drained by content.js before our observer existed sit unprocessed
+    // on the dataset — pick them up now that the token/store are available.
+    processFilterCommands();
 
     // Intercept fetch to catch filter save/delete API calls
     const _origFetch = window.fetch;
@@ -556,8 +758,9 @@
         lbl.style.cssText = 'display:none;position:absolute;bottom:calc(100% + 5px);left:50%;transform:translateX(-50%);white-space:nowrap;font:bold 11px/1.4 sans-serif;color:#fff;background:rgba(25,30,40,0.85);padding:2px 5px;border-radius:3px;pointer-events:none;';
         lbl.textContent = code;
         el.appendChild(lbl);
-        el.addEventListener('mouseenter', () => { lbl.style.display = 'block'; });
-        el.addEventListener('mouseleave', () => { lbl.style.display = 'none'; });
+        // Raise above aircraft rings (z-index:2) on hover so the code popup isn't buried
+        el.addEventListener('mouseenter', () => { lbl.style.display = 'block'; el.style.zIndex = '3'; });
+        el.addEventListener('mouseleave', () => { lbl.style.display = 'none';  el.style.zIndex = '1'; });
         container.appendChild(el);
         apMarkers.set(code, el);
       }
@@ -606,16 +809,7 @@
       } catch (_) {}
     }
     if (mutations.some(m => m.attributeName === 'data-fr24filtercommands')) {
-      const raw = document.documentElement.dataset.fr24filtercommands;
-      if (raw) {
-        document.documentElement.removeAttribute('data-fr24filtercommands');
-        try {
-          const cmds = JSON.parse(raw);
-          if (cmds.some(c => c.type === 'refresh')) {
-            document.querySelector('#bottom-panel__filters-button')?.click();
-          }
-        } catch (_) {}
-      }
+      processFilterCommands();
     }
     if (!isEnabled()) { clearAll(); return; }
     if (aircraftStore) processAircraftMap(aircraftStore.$state.aircraftMap);
