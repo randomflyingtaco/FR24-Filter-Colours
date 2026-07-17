@@ -550,7 +550,7 @@
         markers.set(id, el);
       }
       const el    = markers.get(id);
-      el.style.borderColor = color;
+      el.style.cssText += 'border-color:' + color + ' !important;';  // so darkreader doesn't override it
       el.style.opacity     = '0.9';
       el.style.left       = x + 'px';
       el.style.top        = y + 'px';
@@ -736,7 +736,7 @@
 
     // bounds-cull — only position dots inside the current viewport; hide others without destroying them
     const viewBounds = mapObj.getBounds();
-
+    const dotRadius = Math.min(18, Math.max(9, 14 * scale / 100)); // px
     for (const [code, { lat, lng }] of airportDots) {
       if (!codes.has(code)) continue;
       if (!showAll && hideEmpty && !activeAirports.has(code)) continue;
@@ -753,7 +753,6 @@
       if (!el) {
         el = document.createElement('div');
         el.dataset.ap = code;
-        el.style.cssText = 'position:absolute;width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px #000;transform:translate(-50%,-50%);pointer-events:auto;cursor:default;z-index:1;';
         const lbl = document.createElement('span');
         lbl.style.cssText = 'display:none;position:absolute;bottom:calc(100% + 5px);left:50%;transform:translateX(-50%);white-space:nowrap;font:bold 11px/1.4 sans-serif;color:#fff;background:rgba(25,30,40,0.85);padding:2px 5px;border-radius:3px;pointer-events:none;';
         lbl.textContent = code;
@@ -764,8 +763,9 @@
         container.appendChild(el);
         apMarkers.set(code, el);
       }
+      el.style.cssText = 'position:absolute;width:' + dotRadius + 'px;height:' + dotRadius + 'px;border-radius:50%;border:2px solid #fff !important;box-shadow:0 0 0 1px #000 !important;transform:translate(-50%,-50%);pointer-events:auto;cursor:default;z-index:1;';
+      el.style.cssText += ';background:' + (color || defaultColor) + ' !important;';
       el.style.display = '';
-      el.style.background = color || defaultColor;
       const { x, y } = toPixel(proj, sw, ne, scale, lat, lng);
       el.style.left = x + 'px';
       el.style.top  = y + 'px';
@@ -778,15 +778,20 @@
     for (const el of container.querySelectorAll('[data-claimed]')) {
       if (!active.has(el.dataset.claimed)) el.remove();
     }
+    const doubleRadius = !!document.documentElement.dataset.fr24doubleRadius;
+    const baseRadius = (doubleRadius ? 2 : 1) * 1.28 * scale;  // Scale factor needed for 100km radius circle on my monitor settings, idk if it works for others
     for (const [code, { lat, lng }] of claimedDots) {
+      const radius = Math.floor(baseRadius / Math.cos(lat * Math.PI / 180));  // Adjust for mercator distortion (cosine of latitude)
+      const borderRadius = Math.floor(radius / 60 + 6);
+      const shadowRadius = Math.ceil(radius / 180);
       const { x, y } = toPixel(proj, sw, ne, scale, lat, lng);
       let el = container.querySelector(`[data-claimed="${code}"]`);
       if (!el) {
         el = document.createElement('div');
         el.dataset.claimed = code;
-        el.style.cssText = 'position:absolute;width:14px;height:14px;border-radius:50%;border:3px solid #ffd700;background:transparent;box-shadow:0 0 0 1px rgba(0,0,0,0.6);transform:translate(-50%,-50%);pointer-events:none;';
         container.appendChild(el);
       }
+      el.style.cssText = 'position:absolute;width:' + radius + 'px;height:' + radius + 'px;border-radius:50%;border:' + borderRadius + 'px solid rgba(255,215,0,0.4) !important;background:transparent !important;box-shadow:0 0 0 ' + shadowRadius + 'px rgba(0,0,0,0.6) !important;transform:translate(-50%,-50%);pointer-events:none;';
       el.style.left = x + 'px';
       el.style.top  = y + 'px';
     }

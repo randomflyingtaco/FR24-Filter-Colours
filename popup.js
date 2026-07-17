@@ -15,7 +15,7 @@ function setToggleUI(enabled) {
 
 async function load() {
   const [sync, local] = await Promise.all([
-    chrome.storage.sync.get(['groups', 'assignments', 'showAllAirports', 'hideEmptyAirportDots', 'defaultAirportColor', 'extensionEnabled', 'claimedAirports', 'maptrackUrl', 'maptrackUser', 'maptrackPass']),
+    chrome.storage.sync.get(['groups', 'assignments', 'showAllAirports', 'hideEmptyAirportDots', 'defaultAirportColor', 'extensionEnabled', 'doubleRadius', 'claimedAirports', 'maptrackUrl', 'maptrackUser', 'maptrackPass']),
     chrome.storage.local.get(['fr24Filters']),
   ]);
   filters         = local.fr24Filters    || [];
@@ -25,6 +25,7 @@ async function load() {
   document.getElementById('showAllAirports').checked      = sync.showAllAirports      || false;
   document.getElementById('hideEmptyAirportDots').checked = sync.hideEmptyAirportDots || false;
   document.getElementById('defaultAirportColor').value    = sync.defaultAirportColor  || '#ff3b3b';
+  document.getElementById('doubleRadius').checked         = sync.doubleRadius         || false;
   setToggleUI(sync.extensionEnabled !== false);
   document.getElementById('maptrackUrl').value  = sync.maptrackUrl  || '';
   document.getElementById('maptrackUser').value = sync.maptrackUser || '';
@@ -86,6 +87,9 @@ document.getElementById('hideEmptyAirportDots').addEventListener('change', e => 
 });
 document.getElementById('defaultAirportColor').addEventListener('input', e => {
   chrome.storage.sync.set({ defaultAirportColor: e.target.value });
+});
+document.getElementById('doubleRadius').addEventListener('change', e => {
+  chrome.storage.sync.set({ doubleRadius: e.target.checked });
 });
 
 function save() {
