@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FR24 Filter Colours",
-  "version": "2.0",
+  "version": "2.1",
   "description": "Colour-code aircraft on Flightradar24 by filter group so you can instantly see which category each flight belongs to.",
   "background": { "scripts": ["background.js"] },
   "permissions": ["storage", "cookies"],

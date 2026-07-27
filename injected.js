@@ -34,10 +34,13 @@
     return _regMap;
   }
 
+  function getPinia() {
+    return document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$pinia || null;
+  }
+
   function getAccessToken() {
     try {
-      return document.querySelector('#app').__vue_app__.config.globalProperties.$pinia
-        ._s.get('dispatcher').$state.dispatcher.accessToken;
+      return getPinia()._s.get('dispatcher').$state.dispatcher.accessToken;
     } catch (_) { return null; }
   }
 
@@ -54,12 +57,7 @@
     if (allFilters) return;
     try {
       const data = JSON.parse(document.querySelector('#app').dataset.page);
-      allFilters = data.props.dispatcher.filters.filters.map(f => ({
-        id:         f.id,
-        name:       f.name,
-        enabled:    f.enabled,
-        conditions: f.conditions,
-      }));
+      allFilters = mapFilters(data.props.dispatcher.filters.filters);
       console.log('[FR24FC] filters loaded:', allFilters.length);
     } catch (e) {
       console.warn('[FR24FC] filter load failed:', e);
@@ -100,7 +98,7 @@
   function matchesCond(ac, c) {
     switch (c.type) {
       case 'Registration': return ac.reg  === c.value;
-      case 'Aircraft':     return ac.type === c.value; // null icao → always false for this condition
+      case 'Aircraft':     return ac.type === c.value;
       case 'Altitude':     return ac.alt  >= c.value[0] && ac.alt <= c.value[1];
       case 'Airport':      return (c.direction === 'in' ? ac.dest : ac.origin) === c.value;
       case 'Airline':
@@ -146,7 +144,10 @@
     acData.clear();
     for (const el of apMarkers.values()) el.remove();
     apMarkers.clear();
+    airportDots.clear();
+    claimedDots.clear();
     container?.querySelectorAll('[data-ap]').forEach(el => el.remove());
+    container?.querySelectorAll('[data-claimed]').forEach(el => el.remove());
   }
 
   function processAircraftMap(aircraftMap) {
@@ -175,11 +176,17 @@
 
     acData.clear();
     for (const [id, a] of Object.entries(aircraftMap)) {
+      // FR24 only puts a field on the feed record when its own display needs it, so
+      // type/registration/from/to arrive only while the user has FR24's aircraft
+      // labels on with Type/Registration/Route ticked (same gating as logoId).
+      // Undefined when they are off, which fails the === compares harmlessly.
+      // Was reading a.icao for type, which is never populated - that is what made
+      // type filters look impossible to support.
       const ac = {
         lat:      a.latitude,
         lng:      a.longitude,
         alt:      a.altitude,
-        type:     a.icao,
+        type:     a.type,
         reg:      a.registration,
         origin:   a.from,
         dest:     a.to,
@@ -216,13 +223,26 @@
     try { document.documentElement.dataset.fr24filterlist = JSON.stringify(allFilters); } catch (_) {}
   }
 
-  function updateFiltersFromStore(dispatcher) {
-    const raw = dispatcher?.filters?.filters;
-    if (!raw) return;
-    allFilters = raw.map(f => ({ id: String(f.id), name: f.name, enabled: f.enabled, conditions: f.conditions }));
+  // Normalise a raw filter list; id ALWAYS coerced to string so the number/string
+  // strict comparisons downstream (DELETE interceptor, isDestFilter) stay consistent.
+  function mapFilters(list) {
+    return list.map(f => ({ id: String(f.id), name: f.name, enabled: f.enabled, conditions: f.conditions }));
+  }
+
+  // Rebuild allFilters from a fetched/store list and run the standard follow-ups.
+  // NOT for loadFilters, which must not fire these before the stores exist
+  // (loadFilters uses mapFilters only).
+  function applyFilterList(list) {
+    allFilters = mapFilters(list);
     updateAirportCodesFromAllFilters();
     if (aircraftStore) processAircraftMap(aircraftStore.$state.aircraftMap);
     syncFilterListToDataset();
+  }
+
+  function updateFiltersFromStore(dispatcher) {
+    const raw = dispatcher?.filters?.filters;
+    if (!raw) return;
+    applyFilterList(raw);
   }
 
   // The filter button is conditionally rendered by FR24's Vue (absent while
@@ -286,16 +306,23 @@
   // first (so the click re-applies the POST-mutation filter list), but the click itself
   // must happen exactly once per drained batch containing a refresh — even if the
   // webAPI fetch fails or returns no list. Zero clicks is the bug.
-  function refreshFilters(token) {
+  // Re-fetch the filter list from FR24's webAPI and rebuild internal state.
+  // No click, no $patch - callers add those. Native fetch keeps this out of the
+  // interceptor (D7). Resolves the fetched list, or null when none came back.
+  function refetchFilters(token) {
     return _nativeFetch('https://www.flightradar24.com/webapi/v1/filters?only=filters', {
       headers: { accesstoken: token },
     }).then(r => r.json()).then(({ data: d }) => {
       const list = d?.filters;
+      if (!list) return null;
+      applyFilterList(list);
+      return list;
+    });
+  }
+
+  function refreshFilters(token) {
+    return refetchFilters(token).then(list => {
       if (!list) return;
-      allFilters = list.map(f => ({ id: String(f.id), name: f.name, enabled: f.enabled, conditions: f.conditions }));
-      updateAirportCodesFromAllFilters();
-      if (aircraftStore) processAircraftMap(aircraftStore.$state.aircraftMap);
-      syncFilterListToDataset();
       // Patch the Pinia dispatcher store so the click re-applies the fresh list,
       // not the page's stale one (the mutation happened server-side via webAPI).
       if (dispatcherStore) {
@@ -338,6 +365,7 @@
   // before the token exists wait, and overlapping batches run strictly in order.
   let _cmdBacklog = [];
   let _cmdRunning = false;
+  let _cmdNoTokenWarned = false;
 
   function processFilterCommands() {
     const raw = document.documentElement.dataset.fr24filtercommands;
@@ -355,10 +383,17 @@
         _cmdBacklog = [];
         _cmdRunning = true;
         clickFilterButton().finally(() => { _cmdRunning = false; });
+      } else if (!_cmdNoTokenWarned) {
+        // Mutation specs can't run without a token and nothing reports back to the
+        // server (D2: the extension never composes a log). Warn once so a stuck
+        // logged-out backlog is visible; re-arms after a successful token run below.
+        _cmdNoTokenWarned = true;
+        console.warn('[FR24FC] filter command(s) held: no FR24 access token (logged out?). Will retry when the dispatcher store appears.');
       }
       return;
     }
     _cmdRunning = true;
+    _cmdNoTokenWarned = false;
     (async () => {
       while (_cmdBacklog.length) {
         const cmds = _cmdBacklog; _cmdBacklog = [];
@@ -375,9 +410,7 @@
   }
 
   const dispatcherTimer = setInterval(() => {
-    const app   = document.querySelector('#app')?.__vue_app__;
-    const pinia = app?.config?.globalProperties?.$pinia;
-    const dispatcher  = pinia?._s?.get('dispatcher');
+    const dispatcher = getPinia()?._s?.get('dispatcher');
     if (!dispatcher) return;
     clearInterval(dispatcherTimer);
     dispatcherStore = dispatcher;
@@ -415,23 +448,10 @@
           if (!raw) {
             // empty=true response omits filter list; fetch it fresh so enable/disable is reflected immediately
             const token = getAccessToken();
-            if (!token) return;
-            _origFetch('https://www.flightradar24.com/webapi/v1/filters?only=filters', {
-              headers: { accesstoken: token },
-            }).then(r => r.json()).then(({ data: d }) => {
-              const list = d?.filters;
-              if (!list) return;
-              allFilters = list.map(f => ({ id: String(f.id), name: f.name, enabled: f.enabled, conditions: f.conditions }));
-              updateAirportCodesFromAllFilters();
-              if (aircraftStore) processAircraftMap(aircraftStore.$state.aircraftMap);
-              syncFilterListToDataset();
-            }).catch(() => {});
+            if (token) refetchFilters(token).catch(() => {});
             return;
           }
-          allFilters = raw.map(f => ({ id: String(f.id), name: f.name, enabled: f.enabled, conditions: f.conditions }));
-          updateAirportCodesFromAllFilters();
-          if (aircraftStore) processAircraftMap(aircraftStore.$state.aircraftMap);
-          syncFilterListToDataset();
+          applyFilterList(raw);
         }).catch(e => console.warn('[FR24FC] response parse error:', e));
       }
       return response;
@@ -445,9 +465,7 @@
   }
 
   const storeTimer = setInterval(() => {
-    const app   = document.querySelector('#app')?.__vue_app__;
-    const pinia = app?.config?.globalProperties?.$pinia;
-    const store = pinia?._s?.get('aircraft');
+    const store = getPinia()?._s?.get('aircraft');
     if (!store) return;
     clearInterval(storeTimer);
     aircraftStore = store;
@@ -633,14 +651,26 @@
     catch (e) { return new Set(); }
   }
 
+  // Airport store shape varies across FR24 builds; probe the known keys.
+  function getAirportData(state) {
+    return state.airportMap ?? state.airports ?? state.airportsMap;
+  }
+
+  // Extract code (IATA-first, D1) + coords from an airport-store record.
+  function airportEntry(ap) {
+    return {
+      code: ap.iata || ap.icao || ap.code || ap.id,
+      lat:  ap.lat ?? ap.latitude,
+      lng:  ap.lon ?? ap.lng ?? ap.longitude,
+    };
+  }
+
   function processAirports(data) {
     const filterCodes  = getFilterAirportCodes();
     const claimedCodes = getClaimedCodes();
     const entries = Array.isArray(data) ? data : Object.values(data);
     for (const ap of entries) {
-      const code = ap.iata || ap.icao || ap.code || ap.id;
-      const lat  = ap.lat ?? ap.latitude;
-      const lng  = ap.lon ?? ap.lng ?? ap.longitude;
+      const { code, lat, lng } = airportEntry(ap);
       if (!code || lat == null || lng == null) continue;
       if (filterCodes.has(code)) airportDots.set(code, { lat, lng, country: ap.country });
       else if (airportDots.has(code)) airportDots.delete(code);
@@ -654,15 +684,12 @@
     const codes = getClaimedCodes();
     if (!codes.size) { scheduleRedraw(); return; }
     if (apStoreRef) {
-      const state = apStoreRef.$state;
-      const data  = state.airportMap ?? state.airports ?? state.airportsMap;
+      const data = getAirportData(apStoreRef.$state);
       if (data) {
         const entries = Array.isArray(data) ? data : Object.values(data);
         for (const ap of entries) {
-          const code = ap.iata || ap.icao || ap.code || ap.id;
+          const { code, lat, lng } = airportEntry(ap);
           if (!codes.has(code)) continue;
-          const lat = ap.lat ?? ap.latitude;
-          const lng = ap.lon ?? ap.lng ?? ap.longitude;
           if (lat != null && lng != null) claimedDots.set(code, { lat, lng });
         }
       }
@@ -671,13 +698,12 @@
   }
 
   const apStoreTimer = setInterval(() => {
-    const app   = document.querySelector('#app')?.__vue_app__;
-    const pinia = app?.config?.globalProperties?.$pinia;
+    const pinia = getPinia();
     if (!pinia) return;
     for (const [name, store] of pinia._s) {
       const s = store.$state;
       if (!s) continue;
-      const candidate = s.airportMap ?? s.airports ?? s.airportsMap;
+      const candidate = getAirportData(s);
       if (!candidate) continue;
       clearInterval(apStoreTimer);
       apStoreRef = store;
@@ -685,7 +711,7 @@
       processAirports(candidate);
       updateClaimedLocations();
       store.$subscribe((_, state) => {
-        const d = state.airportMap ?? state.airports ?? state.airportsMap;
+        const d = getAirportData(state);
         if (d) processAirports(d);
       });
       return;
@@ -802,8 +828,7 @@
     if (mutations.some(m => m.attributeName === 'data-fr24airports')) {
       // Re-process from Pinia store so newly-added filter airports get picked up immediately
       if (apStoreRef) {
-        const s = apStoreRef.$state;
-        const d = s.airportMap ?? s.airports ?? s.airportsMap;
+        const d = getAirportData(apStoreRef.$state);
         if (d) processAirports(d);
       }
     }
