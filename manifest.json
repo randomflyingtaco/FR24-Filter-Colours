@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1dbsXEavGsXH7fNvT+VcpcP4BZxdBzaeq1sOWC0XPm1uhrHul+BuJDpK05DPhdJawN79X5G5hsGX9tygP9QWfHH0/XX2cZv3z8t2EUfFNjrldxy26Ayk+lneZ+cE8CvNWC4d6vDwuW0R5BnSTHHTMG/vs8UzwP9BJ+yN6qsBLQZy8qL0/sBAN4qEJ4JEvTSNIaUSow+zaN1g9Wb1Kpo5e+Z6cd1pn53aZVaOu26N1vDUH1PdlE5YR5o2JUC+t2nCHejxyvVLn7QuxhA5tihc+YfMbBoy/zoewlIoqhOEE8ZPbKnVkjVLzaepMDGudPFf8E4++HZ1h/eOjHT92t3cowIDAQAB",
   "name": "FR24 Filter Colours",
-  "version": "2.0",
+  "version": "2.1",
   "description": "Colour-code aircraft on Flightradar24 by filter group so you can instantly see which category each flight belongs to.",
   "background": { "service_worker": "background.js" },
   "permissions": ["storage", "cookies"],

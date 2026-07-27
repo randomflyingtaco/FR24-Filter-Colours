@@ -5,6 +5,13 @@ let filters       = [];
 let assignments   = {};
 let claimedAirports = [];
 
+// sync per-item quota is ~8KB; surface a silent quota/write failure instead of losing config quietly.
+function syncSet(obj) {
+  chrome.storage.sync.set(obj, () => {
+    if (chrome.runtime.lastError) console.warn('[FR24FC] sync write failed:', chrome.runtime.lastError.message);
+  });
+}
+
 function setToggleUI(enabled) {
   const btn = document.getElementById('toggleEnabled');
   btn.textContent       = enabled ? 'On' : 'Off';
@@ -62,7 +69,7 @@ function setMapTrackDependentUI(connected) {
   document.getElementById('hideEmptySection').classList.toggle('maptrack-disabled', !connected);
   if (!connected) {
     document.getElementById('hideEmptyAirportDots').checked = false;
-    chrome.storage.sync.set({ hideEmptyAirportDots: false });
+    syncSet({ hideEmptyAirportDots: false });
   }
 }
 
@@ -70,7 +77,7 @@ function saveMapTrack() {
   const url  = document.getElementById('maptrackUrl').value.trim();
   const user = document.getElementById('maptrackUser').value.trim();
   const pass = document.getElementById('maptrackPass').value;
-  chrome.storage.sync.set({ maptrackUrl: url, maptrackUser: user, maptrackPass: pass });
+  syncSet({ maptrackUrl: url, maptrackUser: user, maptrackPass: pass });
   checkMapTrackConnection(url, user, pass);
 }
 
@@ -79,17 +86,17 @@ document.getElementById('maptrackUser').addEventListener('change', saveMapTrack)
 document.getElementById('maptrackPass').addEventListener('change', saveMapTrack);
 
 document.getElementById('showAllAirports').addEventListener('change', e => {
-  chrome.storage.sync.set({ showAllAirports: e.target.checked });
+  syncSet({ showAllAirports: e.target.checked });
 });
 document.getElementById('hideEmptyAirportDots').addEventListener('change', e => {
-  chrome.storage.sync.set({ hideEmptyAirportDots: e.target.checked });
+  syncSet({ hideEmptyAirportDots: e.target.checked });
 });
 document.getElementById('defaultAirportColor').addEventListener('input', e => {
-  chrome.storage.sync.set({ defaultAirportColor: e.target.value });
+  syncSet({ defaultAirportColor: e.target.value });
 });
 
 function save() {
-  chrome.storage.sync.set({ groups, assignments });
+  syncSet({ groups, assignments });
 }
 
 function render() {
@@ -111,7 +118,7 @@ function renderClaimed() {
     x.style.cssText = 'background:none;border:none;cursor:pointer;color:#92400e;font-size:14px;line-height:1;padding:0 0 0 3px;';
     x.addEventListener('click', () => {
       claimedAirports = claimedAirports.filter(c => c !== code);
-      chrome.storage.sync.set({ claimedAirports });
+      syncSet({ claimedAirports });
       renderClaimed();
     });
     chip.appendChild(x);
@@ -237,7 +244,7 @@ function addClaim() {
   const code  = input.value.trim().toUpperCase();
   if (!code || claimedAirports.includes(code)) { input.value = ''; return; }
   claimedAirports.push(code);
-  chrome.storage.sync.set({ claimedAirports });
+  syncSet({ claimedAirports });
   input.value = '';
   renderClaimed();
 }
@@ -246,14 +253,14 @@ document.getElementById('addClaim').addEventListener('click', addClaim);
 document.getElementById('claimInput').addEventListener('keydown', e => { if (e.key === 'Enter') addClaim(); });
 document.getElementById('clearClaims').addEventListener('click', () => {
   claimedAirports = [];
-  chrome.storage.sync.set({ claimedAirports });
+  syncSet({ claimedAirports });
   renderClaimed();
 });
 
 document.getElementById('toggleEnabled').addEventListener('click', () => {
   chrome.storage.sync.get({ extensionEnabled: true }, ({ extensionEnabled }) => {
     const next = !extensionEnabled;
-    chrome.storage.sync.set({ extensionEnabled: next });
+    syncSet({ extensionEnabled: next });
     setToggleUI(next);
   });
 });
