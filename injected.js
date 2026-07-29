@@ -549,10 +549,12 @@
     const regMapActive = Object.keys(regMap).length > 0;
 
     const seen = new Set();
+    const audio = new Audio('https://www.myinstants.com/media/sounds/poe-trade-woop-pulse-mp3.mp3');
     for (const [id, { lat, lng, filterId, alt, reg, dest }] of acData) {
       const meta = filterColorMap[filterId];
       if (!meta) continue; // filter unassigned — skip
       const { color, name } = meta;
+      const alert = name.at(-1) === '!'; // alert flag: last char of filter name is '!'
 
       seen.add(id);
       const { x, y } = toPixel(proj, sw, ne, scale, lat, lng);
@@ -566,6 +568,9 @@
         el.appendChild(lbl);
         container.appendChild(el);
         markers.set(id, el);
+        if (alert) {
+          audio.play();
+        }
       }
       const el    = markers.get(id);
       el.style.cssText += 'border-color:' + color + ' !important;';  // so darkreader doesn't override it
